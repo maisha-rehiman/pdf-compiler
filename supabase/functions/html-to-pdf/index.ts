@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import puppeteer from "https://deno.land/x/puppeteer@16.2.0/mod.ts"
 
 serve(async (req) => {
+  // 1. Only allow incoming POST requests from n8n
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 })
   }
@@ -12,22 +12,20 @@ serve(async (req) => {
       return new Response('Missing HTML content', { status: 400 })
     }
 
-    // Launch a headless browser instance natively in Deno
-    const browser = await puppeteer.launch({
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    })
-    const page = await browser.newPage()
-
-    await page.setContent(htmlContent, { waitUntil: 'networkidle0' })
-
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: { top: '20px', bottom: '20px', left: '20px', right: '20px' }
+    // 2. Forward the HTML string to a public WASM-isolated headless Chromium compiler
+    const response = await fetch("https://html-to-pdf-wasm.deno.dev/convert", {
+      method: "POST",
+      headers: { "Content-Type": "text/html" },
+      body: htmlContent
     })
 
-    await browser.close()
+    if (!response.ok) {
+      throw new Error(`Compiler backend returned status ${response.status}`)
+    }
 
+    const pdfBuffer = await response.arrayBuffer()
+
+    // 3. Return the clean, compiled binary stream back out to n8n
     return new Response(pdfBuffer, {
       headers: {
         'Content-Type': 'application/pdf',
